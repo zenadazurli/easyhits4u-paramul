@@ -1,0 +1,7 @@
+requests
+numpy
+opencv-python-headless
+supabase
+urllib3
+datasets
+huggingface-hub
