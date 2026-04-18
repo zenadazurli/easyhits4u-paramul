@@ -56,7 +56,7 @@ print("=" * 60, flush=True)
 X_fast = None
 y_fast = None
 classes_fast = None
-lock = threading.Lock()  # Per salvare log in modo thread-safe
+lock = threading.Lock()
 
 # ================ LOG THREAD-SAFE ====================
 def log(msg, account_name=None):
@@ -441,10 +441,11 @@ def run_account(account, results):
                     seen[label] = i
             
             if chosen_idx is None:
-                log(f"❌ NESSUN DUPLICATO", name)
+                log(f"❌ NESSUN DUPLICATO - Errore riconoscimento", name)
                 salva_errore(name, qpic, img, picmap, labels, None, "nessun_duplicato", urlid)
                 log(f"🛑 FERMO PER ANALISI ERRORI", name)
-                break
+                results.append({'name': name, 'captcha': captcha_counter, 'status': 'error'})
+                return  # FORZA USCITA DAL THREAD
             
             time.sleep(seconds)
             word = picmap[chosen_idx]["value"]
@@ -454,11 +455,23 @@ def run_account(account, results):
                 verify=False
             )
             
-            if resp.json().get("warning") == "wrong_choice":
-                log(f"❌ WRONG CHOICE", name)
+            resp_data = resp.json()
+            warning = resp_data.get("warning")
+            
+            # CONTROLLO ERRORI DOPO L'INVIO
+            if warning == "wrong_choice":
+                log(f"❌ WRONG CHOICE - Errore riconoscimento", name)
                 salva_errore(name, qpic, img, picmap, labels, chosen_idx, "wrong_choice", urlid)
                 log(f"🛑 FERMO PER ANALISI ERRORI", name)
-                break
+                results.append({'name': name, 'captcha': captcha_counter, 'status': 'error'})
+                return  # FORZA USCITA DAL THREAD
+            
+            if warning and warning != "1" and warning != "1.5":
+                log(f"❌ WARNING: {warning} - Errore sconosciuto", name)
+                salva_errore(name, qpic, img, picmap, labels, chosen_idx, f"warning_{warning}", urlid)
+                log(f"🛑 FERMO PER ANALISI ERRORI", name)
+                results.append({'name': name, 'captcha': captcha_counter, 'status': 'error'})
+                return  # FORZA USCITA DAL THREAD
             
             captcha_counter += 1
             if captcha_counter % 10 == 0:
@@ -503,12 +516,10 @@ def load_accounts():
 def main():
     log("🐝 Avvio EasyHits4U Swarm (PARALLELO)")
     
-    # Carica dataset
     if not load_dataset_from_hf():
         log("❌ Impossibile proseguire senza dataset")
         return
     
-    # Carica account
     accounts = load_accounts()
     if not accounts:
         log("❌ Nessun account trovato in accounts.txt")
@@ -518,7 +529,6 @@ def main():
     log(f"📋 Caricati {len(accounts)} account")
     log(f"🚀 Avvio {len(accounts)} thread in parallelo...")
     
-    # Avvia thread in parallelo
     threads = []
     results = []
     
@@ -526,22 +536,22 @@ def main():
         t = threading.Thread(target=run_account, args=(account, results))
         t.start()
         threads.append(t)
-        time.sleep(0.5)  # Piccola pausa tra l'avvio dei thread
+        time.sleep(0.5)
     
-    # Attendi tutti i thread
     for t in threads:
         t.join()
     
-    # Riepilogo finale
     total_captcha = sum(r['captcha'] for r in results)
     
     log("=" * 60)
     log("📊 RIEPILOGO FINALE")
     log("=" * 60)
     for r in results:
-        log(f"   {r['name']}: {r['captcha']} captcha")
+        status_icon = "✅" if r['status'] == 'completed' else "❌"
+        log(f"   {status_icon} {r['name']}: {r['captcha']} captcha ({r['status']})")
     log(f"   TOTALE: {total_captcha} captcha")
     log("=" * 60)
 
 if __name__ == "__main__":
     main()
+     
