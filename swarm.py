@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # swarm.py - Multi-account PARALLELO per EasyHits4U
+# Gestisce figure, captcha matematici, e si ferma su errori
 
 import os
 import sys
@@ -373,6 +374,34 @@ def salva_errore(account_name, qpic, img, picmap, labels, chosen_idx, motivo, ur
     
     log(f"📁 Errore salvato in {folder}", account_name)
 
+def salva_captcha_matematico(account_name, qpic, img, data):
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    folder = os.path.join(ERRORI_DIR, f"{account_name}_math_{timestamp}_{qpic}")
+    os.makedirs(folder, exist_ok=True)
+    
+    full_path = os.path.join(folder, "full.jpg")
+    cv2.imwrite(full_path, img)
+    
+    surfses = data.get("surfses", {})
+    metadata = {
+        "account_name": account_name,
+        "timestamp": timestamp,
+        "qpic": qpic,
+        "tipo": "matematico",
+        "aword1": surfses.get("aword1"),
+        "aword1_number": surfses.get("aword1_number"),
+        "aword2": surfses.get("aword2"),
+        "aword2_number": surfses.get("aword2_number"),
+        "aword3": surfses.get("aword3"),
+        "aword3_number": surfses.get("aword3_number"),
+        "urlid": data.get("surfses", {}).get("urlid"),
+    }
+    
+    with open(os.path.join(folder, "metadata.json"), "w") as f:
+        json.dump(metadata, f, indent=2)
+    
+    log(f"📁 Captcha matematico salvato in {folder}", account_name)
+
 # ================ ACCOUNT WORKER (THREAD) ====================
 def run_account(account, results):
     email = account['email']
@@ -416,8 +445,8 @@ def run_account(account, results):
             seconds = int(data.get("surfses", {}).get("seconds", 20))
             picmap = data.get("picmap", [])
             
-            if not urlid or not qpic or not picmap:
-                log(f"⚠️ Cookie scaduto, rigenero...", name)
+            if not urlid or not qpic:
+                log(f"⚠️ Dati incompleti, rigenero cookie...", name)
                 cookie_string = generate_cookie(email, password, name)
                 if cookie_string:
                     session.headers.update({"Cookie": cookie_string})
@@ -425,6 +454,17 @@ def run_account(account, results):
                 else:
                     break
             
+            # ================ RILEVA CAPTCHA MATEMATICO ================
+            if picmap is None or len(picmap) == 0:
+                log(f"🧮 CAPTCHA MATEMATICO rilevato - non supportato", name)
+                img_data = session.get(f"https://www.easyhits4u.com/simg/{qpic}.jpg", verify=False).content
+                img = cv2.imdecode(np.frombuffer(img_data, np.uint8), cv2.IMREAD_COLOR)
+                salva_captcha_matematico(name, qpic, img, data)
+                log(f"🛑 FERMO PER ANALISI CAPTCHA MATEMATICO", name)
+                results.append({'name': name, 'captcha': captcha_counter, 'status': 'math_captcha'})
+                return
+            
+            # ================ RICONOSCIMENTO FIGURE ================
             img_data = session.get(f"https://www.easyhits4u.com/simg/{qpic}.jpg", verify=False).content
             img = cv2.imdecode(np.frombuffer(img_data, np.uint8), cv2.IMREAD_COLOR)
             
@@ -458,7 +498,7 @@ def run_account(account, results):
             resp_data = resp.json()
             warning = resp_data.get("warning")
             
-            # SOLO "wrong_choice" è un errore (i valori numerici sono crediti guadagnati)
+            # SOLO "wrong_choice" è un errore (i valori numerici sono crediti)
             if warning == "wrong_choice":
                 log(f"❌ WRONG CHOICE - Errore riconoscimento", name)
                 salva_errore(name, qpic, img, picmap, labels, chosen_idx, "wrong_choice", urlid)
@@ -466,7 +506,7 @@ def run_account(account, results):
                 results.append({'name': name, 'captcha': captcha_counter, 'status': 'error'})
                 return
             
-            # SUCCESSO! I valori numerici (0.5, 1, 1.5, 2, ecc.) sono crediti
+            # SUCCESSO!
             captcha_counter += 1
             if captcha_counter % 10 == 0:
                 log(f"✅ #{captcha_counter}/{captcha_limit} - indice {chosen_idx} (crediti: {warning})", name)
@@ -545,6 +585,8 @@ def main():
             icon = "✅"
         elif r['status'] == 'error':
             icon = "⚠️"
+        elif r['status'] == 'math_captcha':
+            icon = "🧮"
         else:
             icon = "❌"
         log(f"   {icon} {r['name']}: {r['captcha']} captcha ({r['status']})")
