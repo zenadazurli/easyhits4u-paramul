@@ -445,7 +445,7 @@ def run_account(account, results):
                 salva_errore(name, qpic, img, picmap, labels, None, "nessun_duplicato", urlid)
                 log(f"🛑 FERMO PER ANALISI ERRORI", name)
                 results.append({'name': name, 'captcha': captcha_counter, 'status': 'error'})
-                return  # FORZA USCITA DAL THREAD
+                return
             
             time.sleep(seconds)
             word = picmap[chosen_idx]["value"]
@@ -458,24 +458,18 @@ def run_account(account, results):
             resp_data = resp.json()
             warning = resp_data.get("warning")
             
-            # CONTROLLO ERRORI DOPO L'INVIO
+            # SOLO "wrong_choice" è un errore (i valori numerici sono crediti guadagnati)
             if warning == "wrong_choice":
                 log(f"❌ WRONG CHOICE - Errore riconoscimento", name)
                 salva_errore(name, qpic, img, picmap, labels, chosen_idx, "wrong_choice", urlid)
                 log(f"🛑 FERMO PER ANALISI ERRORI", name)
                 results.append({'name': name, 'captcha': captcha_counter, 'status': 'error'})
-                return  # FORZA USCITA DAL THREAD
+                return
             
-            if warning and warning != "1" and warning != "1.5":
-                log(f"❌ WARNING: {warning} - Errore sconosciuto", name)
-                salva_errore(name, qpic, img, picmap, labels, chosen_idx, f"warning_{warning}", urlid)
-                log(f"🛑 FERMO PER ANALISI ERRORI", name)
-                results.append({'name': name, 'captcha': captcha_counter, 'status': 'error'})
-                return  # FORZA USCITA DAL THREAD
-            
+            # SUCCESSO! I valori numerici (0.5, 1, 1.5, 2, ecc.) sono crediti
             captcha_counter += 1
             if captcha_counter % 10 == 0:
-                log(f"✅ #{captcha_counter}/{captcha_limit} - indice {chosen_idx}", name)
+                log(f"✅ #{captcha_counter}/{captcha_limit} - indice {chosen_idx} (crediti: {warning})", name)
             
             time.sleep(2)
             
@@ -547,8 +541,13 @@ def main():
     log("📊 RIEPILOGO FINALE")
     log("=" * 60)
     for r in results:
-        status_icon = "✅" if r['status'] == 'completed' else "❌"
-        log(f"   {status_icon} {r['name']}: {r['captcha']} captcha ({r['status']})")
+        if r['status'] == 'completed':
+            icon = "✅"
+        elif r['status'] == 'error':
+            icon = "⚠️"
+        else:
+            icon = "❌"
+        log(f"   {icon} {r['name']}: {r['captcha']} captcha ({r['status']})")
     log(f"   TOTALE: {total_captcha} captcha")
     log("=" * 60)
 
